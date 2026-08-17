@@ -738,19 +738,25 @@ function diag(msg){
 }
 
 function showCloudLogin(){
-  document.getElementById("authOverlay").classList.remove("hidden");
+  const overlay=document.getElementById("authOverlay");
+  overlay.classList.remove("hidden");
+  overlay.style.display="flex";
   document.getElementById("loginBox").classList.remove("hidden");
   document.getElementById("householdBox").classList.add("hidden");
 }
 
 function showCloudHousehold(){
-  document.getElementById("authOverlay").classList.remove("hidden");
+  const overlay=document.getElementById("authOverlay");
+  overlay.classList.remove("hidden");
+  overlay.style.display="flex";
   document.getElementById("loginBox").classList.add("hidden");
   document.getElementById("householdBox").classList.remove("hidden");
 }
 
 function showCloudApp(){
-  document.getElementById("authOverlay").classList.add("hidden");
+  const overlay=document.getElementById("authOverlay");
+  overlay.classList.add("hidden");
+  overlay.style.display="none";
   document.getElementById("cloudUser").classList.remove("hidden");
   document.getElementById("cloudSignOut").classList.remove("hidden");
   document.getElementById("cloudUser").textContent=cloudSession?.user?.email||"";
