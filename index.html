@@ -709,6 +709,14 @@ let cloudSession = null;
 let cloudHousehold = null;
 let authBusy = false;
 
+function withTimeout(promise, ms, label){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error(label+" : délai dépassé")),ms))
+  ]);
+}
+
+
 function cloudMsg(id,text,isBad=false){
   const el=document.getElementById(id);
   if(!el) return;
@@ -771,10 +779,10 @@ async function getMemberHousehold(){
 }
 
 async function findCloudHousehold(){
-  // First try membership, then ownership.
-  const memberHousehold=await getMemberHousehold();
-  if(memberHousehold) return memberHousehold;
-  return await getOwnedHousehold();
+  // Check ownership first. This avoids depending on household_members for the owner.
+  const owned=await getOwnedHousehold();
+  if(owned) return owned;
+  return await getMemberHousehold();
 }
 
 async function ensureOwnerMembership(household){
@@ -829,9 +837,11 @@ async function afterCloudLogin(){
     return;
   }
 
-  // If this is the owner and membership is missing, repair it automatically.
+  // The owner can enter the app even if household_members is not yet repaired.
   if(cloudHousehold.owner_user_id===cloudSession.user.id){
-    await ensureOwnerMembership(cloudHousehold);
+    ensureOwnerMembership(cloudHousehold).catch(err=>{
+      console.warn("Réparation household_members non bloquante :", err);
+    });
   }
 
   await loadCloudAccounts();
@@ -912,9 +922,8 @@ async function doLogin(){
     if(!data.session) throw new Error("Connexion réussie mais aucune session n'a été créée.");
 
     cloudSession=data.session;
-    cloudMsg("cloudAuthMsg","Connexion réussie.");
-
-    await afterCloudLogin();
+    cloudMsg("cloudAuthMsg","Connexion réussie. Chargement du foyer...");
+    await withTimeout(afterCloudLogin(),12000,"Chargement du foyer");
   }catch(e){
     cloudMsg("cloudAuthMsg",e.message,true);
     showCloudLogin();
@@ -1087,7 +1096,7 @@ cloud.auth.onAuthStateChange((event,newSession)=>{
       return;
     }
 
-    await afterCloudLogin();
+    await withTimeout(afterCloudLogin(),12000,"Chargement initial");
   }catch(e){
     cloudMsg("cloudAuthMsg","Erreur au démarrage : "+e.message,true);
     showCloudLogin();
