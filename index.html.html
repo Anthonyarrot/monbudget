@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mon Budget</title>
+<style>
+:root{
+  --bg:#f7f7f5;
+  --card:rgba(255,255,255,.88);
+  --text:#28312d;
+  --muted:#727b76;
+  --line:#dfe4e1;
+  --accent:#6f7f76;
+  --accent-soft:rgba(111,127,118,.12);
+  --accent-mid:rgba(111,127,118,.28);
+  --good:#3f6b55;
+  --bad:#a95555;
+  --warn:#9a7446;
+  --soft:rgba(111,127,118,.07);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#fbfbfa 0%,var(--bg) 100%);color:var(--text)}
+header{background:rgba(255,255,255,.84);color:var(--text);padding:18px 22px;position:sticky;top:0;z-index:10;border-bottom:1px solid var(--line);backdrop-filter:blur(14px)}
+header h1{margin:0;font-size:22px}
+header .sub{opacity:.9;font-size:13px;margin-top:4px}
+main{max-width:1450px;margin:0 auto;padding:18px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.tabs button{border:1px solid var(--line);background:#fff;padding:9px 13px;border-radius:8px;cursor:pointer}
+.tabs button.active{background:var(--accent-soft);color:#435149;border-color:var(--accent-mid);box-shadow:inset 0 0 0 1px rgba(111,127,118,.06)}
+.panel{display:none}.panel.active{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:0 8px 24px rgba(40,49,45,.045);backdrop-filter:blur(8px)}
+.grid{display:grid;gap:12px}.g2{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(3,minmax(0,1fr))}.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:900px){.g2,.g3,.g4{grid-template-columns:1fr}}
+.kpi{background:rgba(255,255,255,.72);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.75)}
+.kpi .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.kpi .value{font-size:25px;font-weight:700;margin-top:6px}
+.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
+input,select,textarea,button{font:inherit}
+input,select,textarea{width:100%;padding:9px;border:1px solid var(--line);border-radius:7px;background:#fff}
+textarea{min-height:72px}
+button.primary{background:var(--accent-soft);color:#435149;border:1px solid var(--accent-mid);border-radius:8px;padding:10px 14px;cursor:pointer;font-weight:600}
+button.secondary{background:rgba(255,255,255,.76);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 12px;cursor:pointer}
+button.danger{background:#fff;color:var(--bad);border:1px solid #fecaca;border-radius:7px;padding:7px 10px;cursor:pointer}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.tabs button:hover,button.secondary:hover,button.primary:hover{background:rgba(111,127,118,.16)}
+tr:hover td{background:rgba(111,127,118,.045)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px;border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top}
+th{background:#f8fafc;position:sticky;top:0}
+.right{text-align:right}.center{text-align:center}
+.table-wrap{overflow:auto;max-height:520px;border:1px solid #e5e7eb;border-radius:8px}
+.small{font-size:12px;color:var(--muted)}
+.tag{display:inline-block;padding:3px 7px;border-radius:999px;background:var(--accent-soft);border:1px solid rgba(111,127,118,.12);font-size:11px}
+.progress{height:10px;background:#e9ecea;border-radius:999px;overflow:hidden}.bar{height:100%;background:rgba(111,127,118,.55)}
+.budget-row{display:grid;grid-template-columns:1.5fr .8fr .8fr .8fr;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #eef2f7}
+.chart{display:flex;align-items:flex-end;gap:8px;height:220px;padding:12px 4px 28px;border-left:1px solid var(--line);border-bottom:1px solid var(--line)}
+.chart-col{flex:1;min-width:38px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;position:relative}
+.chart-bar{width:70%;background:rgba(111,127,118,.48);border:1px solid rgba(111,127,118,.20);border-bottom:0;border-radius:6px 6px 0 0;min-height:2px}
+.chart-label{position:absolute;bottom:-26px;font-size:10px;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chart-value{font-size:10px;margin-bottom:4px}
+.notice{padding:10px 12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:13px}
+.footer-note{font-size:11px;color:var(--muted);margin-top:10px}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>Mon Budget</h1>
+  <div class="sub">Application locale hors ligne • données enregistrées dans ce navigateur</div>
+</header>
+
+<main>
+  <div class="tabs">
+    <button data-tab="dashboard" class="active">Tableau de bord</button>
+    <button data-tab="transactions">Transactions</button>
+    <button data-tab="budgets">Budgets</button>
+    <button data-tab="accounts">Comptes</button>
+    <button data-tab="settings">Paramètres & sauvegarde</button>
+  </div>
+
+  <section id="dashboard" class="panel active">
+    <div class="card">
+      <div class="grid g3">
+        <div>
+          <label>Mois analysé</label>
+          <input type="month" id="dashMonth">
+        </div>
+        <div>
+          <label>Vue</label>
+          <select id="dashAccount"><option value="FOYER">Foyer</option></select>
+        </div>
+        <div class="actions" style="align-items:end">
+          <button class="secondary" id="refreshDash">Actualiser</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g4" id="kpis"></div>
+
+    <div class="grid g2">
+      <div class="card">
+        <h3>Dépenses par catégorie</h3>
+        <div id="categoryChart"></div>
+      </div>
+      <div class="card">
+        <h3>Budget prévu vs réel</h3>
+        <div id="budgetSummary"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Soldes des comptes</h3>
+      <div class="grid g3" id="accountBalances"></div>
+      <div class="footer-note">Les transferts internes sont inclus dans le solde de chaque compte, mais exclus des revenus et dépenses du foyer.</div>
+    </div>
+  </section>
+
+  <section id="transactions" class="panel">
+    <div class="card">
+      <h3>Ajouter une opération</h3>
+      <div class="grid g4">
+        <div><label>Date</label><input type="date" id="txDate"></div>
+        <div><label>Compte</label><select id="txAccount"></select></div>
+        <div><label>Montant (€)</label><input type="number" step="0.01" id="txAmount" placeholder="ex. 42,50"></div>
+        <div><label>Type</label><select id="txType"></select></div>
+        <div><label>Catégorie</label><select id="txCategory"></select></div>
+        <div><label>Nature</label><select id="txNature"></select></div>
+        <div><label>Compte lié (si transfert)</label><select id="txLinkedAccount"></select></div>
+        <div><label>Commentaire</label><input type="text" id="txComment" placeholder="ex. Lidl, coiffeur, salaire..."></div>
+      </div>
+      <div class="actions" style="margin-top:12px">
+        <button class="primary" id="addTx">Ajouter</button>
+        <button class="secondary hidden" id="cancelEdit">Annuler modification</button>
+      </div>
+      <div class="notice" style="margin-top:12px">
+        Saisis les montants en positif. Le type d'opération détermine le sens du mouvement. Pour un transfert interne, crée une seule opération : l'application impacte automatiquement les deux comptes et neutralise le transfert dans l'analyse foyer.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid g4">
+        <div><label>Mois</label><input type="month" id="txFilterMonth"></div>
+        <div><label>Compte</label><select id="txFilterAccount"><option value="">Tous</option></select></div>
+        <div><label>Type</label><select id="txFilterType"><option value="">Tous</option></select></div>
+        <div><label>Recherche</label><input type="text" id="txSearch" placeholder="Catégorie, commentaire..."></div>
+      </div>
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr>
+            <th>Date</th><th>Compte</th><th>Type</th><th>Catégorie</th><th>Nature</th><th>Commentaire</th><th class="right">Montant</th><th></th>
+          </tr></thead>
+          <tbody id="txBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="budgets" class="panel">
+    <div class="card">
+      <div class="grid g3">
+        <div><label>Mois budgété</label><input type="month" id="budgetMonth"></div>
+        <div><label>Vue</label>
+          <select id="budgetAccount"><option value="FOYER">Foyer</option></select>
+        </div>
+        <div class="actions" style="align-items:end"><button class="secondary" id="copyPrevBudget">Copier le mois précédent</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Budget par catégorie</h3>
+      <div class="small" style="margin-bottom:8px">Renseigne une enveloppe mensuelle. Les dépenses réelles se calculent automatiquement à partir des transactions.</div>
+      <div id="budgetEditor"></div>
+    </div>
+  </section>
+
+  <section id="accounts" class="panel">
+    <div class="card">
+      <h3>Soldes de départ mensuels</h3>
+      <div class="grid g3">
+        <div><label>Mois</label><input type="month" id="balanceMonth"></div>
+      </div>
+      <div class="grid g3" id="openingBalanceInputs" style="margin-top:12px"></div>
+      <div class="actions" style="margin-top:12px"><button class="primary" id="saveBalances">Enregistrer les soldes</button></div>
+    </div>
+    <div class="card">
+      <h3>Règles de lecture</h3>
+      <p class="small">Revenu : augmente le solde et compte comme revenu du foyer. Dépense : diminue le solde et compte comme dépense du foyer. Épargne : diminue le compte courant et est suivie séparément. Transfert interne : déplace l'argent entre vos comptes, y compris Revolut Anthony et Revolut Marine, sans modifier le revenu ou la dépense du foyer. Remboursement : augmente le solde et réduit les dépenses nettes de sa catégorie.</p>
+    </div>
+  </section>
+
+  <section id="settings" class="panel">
+    <div class="card">
+      <h3>Comptes</h3>
+      <div class="grid g2">
+        <div>
+          <label>Nouveau compte</label>
+          <input type="text" id="newAccountName" placeholder="ex. Compte courant, Compte joint, Revolut...">
+          <div class="actions" style="margin-top:8px">
+            <button class="primary" id="addAccountBtn">Ajouter le compte</button>
+          </div>
+        </div>
+        <div>
+          <label>Comptes existants</label>
+          <div id="accountManager"></div>
+        </div>
+      </div>
+      <div class="footer-note">Supprimer un compte ne supprime jamais silencieusement ses opérations : l'outil bloque la suppression tant que des transactions utilisent ce compte.</div>
+    </div>
+
+    <div class="card">
+      <h3>Listes personnalisées</h3>
+      <div class="grid g2">
+        <div>
+          <label>Catégories de dépenses / revenus (une par ligne)</label>
+          <textarea id="setCategories" placeholder="Courses&#10;Loyer&#10;Carburant&#10;Salaire..."></textarea>
+        </div>
+        <div>
+          <label>Natures (une par ligne)</label>
+          <textarea id="setNatures" placeholder="Charges fixes&#10;Dépenses variables&#10;Épargne&#10;Revenus"></textarea>
+        </div>
+        <div>
+          <label>Types d'opération (une par ligne)</label>
+          <textarea id="setTypes"></textarea>
+        </div>
+      </div>
+      <div class="actions" style="margin-top:12px"><button class="primary" id="saveSettings">Enregistrer les listes</button></div>
+    </div>
+
+    <div class="card">
+      <h3>Sauvegarde</h3>
+      <div class="actions">
+        <button class="secondary" id="exportJson">Exporter sauvegarde JSON</button>
+        <button class="secondary" id="exportCsv">Exporter transactions CSV</button>
+        <button class="secondary" id="importBtn">Importer sauvegarde JSON</button>
+        <input type="file" id="importFile" accept=".json" class="hidden">
+        <button class="danger" id="resetAll">Effacer toutes les données</button>
+      </div>
+      <div class="notice" style="margin-top:12px">
+        Important : ce fichier HTML enregistre les données dans le stockage local du navigateur. Fais régulièrement une sauvegarde JSON. Si tu changes de navigateur, de profil, ou si tu effaces les données du navigateur, il faudra réimporter la sauvegarde.
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const KEY='budget_foyer_am_v1';
+
+const defaults = {
+  categories:[],
+  natures:['Charges fixes','Dépenses variables','Épargne','Revenus'],
+  accounts:[],
+  types:['Depense','Revenu','Epargne','Transfert interne','Remboursement'],
+  transactions:[],
+  budgets:{},
+  openingBalances:{}
+};
+
+let state = loadState();
+let editingId = null;
+
+function loadState(){
+  try{
+    const x=JSON.parse(localStorage.getItem(KEY));
+    if(x) return {...structuredClone(defaults),...x};
+  }catch(e){}
+  return structuredClone(defaults);
+}
+function saveState(){localStorage.setItem(KEY,JSON.stringify(state));}
+function eur(n){return new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(Number(n||0));}
+function monthOf(d){return (d||'').slice(0,7);}
+function nowMonth(){return new Date().toISOString().slice(0,7);}
+function today(){return new Date().toISOString().slice(0,10);}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
+
+function txEffect(tx, account){
+  const a=Number(tx.amount||0);
+  if(tx.type==='Depense' || tx.type==='Epargne') return tx.account===account ? -a : 0;
+  if(tx.type==='Revenu' || tx.type==='Remboursement') return tx.account===account ? a : 0;
+  if(tx.type==='Transfert interne'){
+    if(tx.account===account) return -a;
+    if(tx.linkedAccount===account) return a;
+  }
+  return 0;
+}
+
+function householdClass(tx){
+  if(tx.type==='Depense') return {expense:Number(tx.amount||0),income:0,saving:0,refund:0};
+  if(tx.type==='Revenu') return {expense:0,income:Number(tx.amount||0),saving:0,refund:0};
+  if(tx.type==='Epargne') return {expense:0,income:0,saving:Number(tx.amount||0),refund:0};
+  if(tx.type==='Remboursement') return {expense:0,income:0,saving:0,refund:Number(tx.amount||0)};
+  return {expense:0,income:0,saving:0,refund:0};
+}
+
+function monthTx(month){return state.transactions.filter(t=>monthOf(t.date)===month);}
+function filteredForView(month,view){
+  const arr=monthTx(month);
+  if(view==='FOYER') return arr;
+  return arr.filter(t=>t.account===view || (t.type==='Transfert interne' && t.linkedAccount===view));
+}
+
+function calcView(month,view){
+  const arr=filteredForView(month,view);
+  let income=0,expense=0,saving=0,refund=0;
+  if(view==='FOYER'){
+    arr.forEach(t=>{
+      const c=householdClass(t);
+      income+=c.income; expense+=c.expense; saving+=c.saving; refund+=c.refund;
+    });
+  }else{
+    arr.forEach(t=>{
+      if(t.account!==view) return;
+      const c=householdClass(t);
+      income+=c.income; expense+=c.expense; saving+=c.saving; refund+=c.refund;
+    });
+  }
+  return {income,expense,saving,refund,netExpense:expense-refund,available:income-(expense-refund)-saving};
+}
+
+function openingBalance(month,account){
+  return Number((state.openingBalances[month]||{})[account]||0);
+}
+function currentBalance(month,account){
+  return openingBalance(month,account)+monthTx(month).reduce((s,t)=>s+txEffect(t,account),0);
+}
+
+function fillSelect(id,items,blank=false){
+  const el=document.getElementById(id); if(!el)return;
+  const current=el.value; el.innerHTML=blank?'<option value="">Tous</option>':'';
+  items.forEach(x=>el.insertAdjacentHTML('beforeend',`<option value="${esc(x)}">${esc(x)}</option>`));
+  if([...el.options].some(o=>o.value===current)) el.value=current;
+}
+function refreshSelects(){
+  fillSelect('txAccount',state.accounts);
+  fillSelect('txLinkedAccount',['',...state.accounts]);
+  fillSelect('txType',state.types);
+  fillSelect('txCategory',state.categories);
+  fillSelect('txNature',state.natures);
+  fillSelect('txFilterAccount',state.accounts,true);
+  fillSelect('txFilterType',state.types,true);
+
+  ['dashAccount','budgetAccount'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el) return;
+    const cur=el.value;
+    el.innerHTML='<option value="FOYER">Foyer</option>'+state.accounts.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('');
+    if([...el.options].some(o=>o.value===cur)) el.value=cur;
+  });
+  renderAccountManager();
+}
+
+function renderDashboard(){
+  const m=document.getElementById('dashMonth').value||nowMonth();
+  const view=document.getElementById('dashAccount').value;
+  const c=calcView(m,view);
+  const budget=getBudgetTotal(m,view);
+  const k=[
+    ['Revenus',c.income,'good'],
+    ['Dépenses nettes',c.netExpense,'bad'],
+    ['Épargne',c.saving,''],
+    ['Reste du mois',c.available,c.available>=0?'good':'bad']
+  ];
+  document.getElementById('kpis').innerHTML=k.map(x=>`<div class="kpi"><div class="label">${x[0]}</div><div class="value ${x[2]}">${eur(x[1])}</div></div>`).join('');
+
+  const byCat={};
+  filteredForView(m,view).forEach(t=>{
+    if(t.type==='Depense'){
+      if(view!=='FOYER' && t.account!==view) return;
+      byCat[t.category]=(byCat[t.category]||0)+Number(t.amount||0);
+    }
+    if(t.type==='Remboursement'){
+      if(view!=='FOYER' && t.account!==view) return;
+      byCat[t.category]=(byCat[t.category]||0)-Number(t.amount||0);
+    }
+  });
+  const rows=Object.entries(byCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  const max=Math.max(1,...rows.map(x=>x[1]));
+  document.getElementById('categoryChart').innerHTML = rows.length
+    ? `<div class="chart">${rows.slice(0,12).map(([n,v])=>`<div class="chart-col"><div class="chart-value">${Math.round(v)}€</div><div class="chart-bar" style="height:${Math.max(3,v/max*100)}%"></div><div class="chart-label" title="${esc(n)}">${esc(n)}</div></div>`).join('')}</div>`
+    : '<div class="small">Aucune dépense pour ce mois.</div>';
+
+  document.getElementById('budgetSummary').innerHTML=`
+    <div class="grid g3">
+      <div class="kpi"><div class="label">Budget prévu</div><div class="value">${eur(budget)}</div></div>
+      <div class="kpi"><div class="label">Réel</div><div class="value">${eur(c.netExpense+c.saving)}</div></div>
+      <div class="kpi"><div class="label">Écart</div><div class="value ${(budget-(c.netExpense+c.saving))>=0?'good':'bad'}">${eur(budget-(c.netExpense+c.saving))}</div></div>
+    </div>`;
+
+  document.getElementById('accountBalances').innerHTML=state.accounts.map(a=>`
+    <div class="kpi"><div class="label">${a}</div><div class="value">${eur(currentBalance(m,a))}</div><div class="small">Début : ${eur(openingBalance(m,a))}</div></div>`).join('');
+}
+
+function renderTransactions(){
+  const m=document.getElementById('txFilterMonth').value;
+  const acc=document.getElementById('txFilterAccount').value;
+  const typ=document.getElementById('txFilterType').value;
+  const q=(document.getElementById('txSearch').value||'').toLowerCase();
+  let arr=[...state.transactions].sort((a,b)=>b.date.localeCompare(a.date));
+  if(m) arr=arr.filter(t=>monthOf(t.date)===m);
+  if(acc) arr=arr.filter(t=>t.account===acc || (t.type==='Transfert interne'&&t.linkedAccount===acc));
+  if(typ) arr=arr.filter(t=>t.type===typ);
+  if(q) arr=arr.filter(t=>`${t.category} ${t.comment} ${t.nature} ${t.account}`.toLowerCase().includes(q));
+  document.getElementById('txBody').innerHTML=arr.map(t=>`
+    <tr>
+      <td>${esc(t.date)}</td>
+      <td>${esc(t.account)}${t.type==='Transfert interne'&&t.linkedAccount?` → ${esc(t.linkedAccount)}`:''}</td>
+      <td><span class="tag">${esc(t.type)}</span></td>
+      <td>${esc(t.category)}</td>
+      <td>${esc(t.nature)}</td>
+      <td>${esc(t.comment||'')}</td>
+      <td class="right">${eur(t.amount)}</td>
+      <td class="right"><button class="secondary" onclick="editTx('${t.id}')">Modifier</button> <button class="danger" onclick="deleteTx('${t.id}')">Suppr.</button></td>
+    </tr>`).join('');
+}
+
+function addOrUpdateTx(){
+  const tx={
+    id:editingId||uid(),
+    date:document.getElementById('txDate').value,
+    account:document.getElementById('txAccount').value,
+    amount:Number(document.getElementById('txAmount').value||0),
+    type:document.getElementById('txType').value,
+    category:document.getElementById('txCategory').value,
+    nature:document.getElementById('txNature').value,
+    linkedAccount:document.getElementById('txLinkedAccount').value,
+    comment:document.getElementById('txComment').value.trim()
+  };
+  if(!tx.date||!tx.account||!tx.amount||!tx.type){alert('Date, compte, montant et type sont obligatoires.');return;}
+  if(tx.type==='Transfert interne'){
+    if(!tx.linkedAccount || tx.linkedAccount===tx.account){alert('Choisis un compte lié différent du compte de départ.');return;}
+  }
+  const idx=state.transactions.findIndex(x=>x.id===tx.id);
+  if(idx>=0) state.transactions[idx]=tx; else state.transactions.push(tx);
+  saveState(); clearTxForm(); renderAll();
+}
+function clearTxForm(){
+  editingId=null;
+  document.getElementById('txDate').value=today();
+  document.getElementById('txAmount').value='';
+  document.getElementById('txComment').value='';
+  document.getElementById('txLinkedAccount').value='';
+  document.getElementById('cancelEdit').classList.add('hidden');
+  document.getElementById('addTx').textContent='Ajouter';
+}
+window.editTx=function(id){
+  const t=state.transactions.find(x=>x.id===id); if(!t)return;
+  editingId=id;
+  ['Date','Account','Amount','Type','Category','Nature','LinkedAccount','Comment'].forEach(()=>{});
+  document.getElementById('txDate').value=t.date;
+  document.getElementById('txAccount').value=t.account;
+  document.getElementById('txAmount').value=t.amount;
+  document.getElementById('txType').value=t.type;
+  document.getElementById('txCategory').value=t.category;
+  document.getElementById('txNature').value=t.nature;
+  document.getElementById('txLinkedAccount').value=t.linkedAccount||'';
+  document.getElementById('txComment').value=t.comment||'';
+  document.getElementById('cancelEdit').classList.remove('hidden');
+  document.getElementById('addTx').textContent='Enregistrer la modification';
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+window.deleteTx=function(id){
+  if(!confirm('Supprimer cette opération ?'))return;
+  state.transactions=state.transactions.filter(x=>x.id!==id); saveState(); renderAll();
+}
+
+function budgetKey(month,view){return `${month}|${view}`;}
+function getBudget(month,view){return state.budgets[budgetKey(month,view)]||{};}
+function getBudgetTotal(month,view){return Object.values(getBudget(month,view)).reduce((s,v)=>s+Number(v||0),0);}
+function actualForBudget(month,view,cat){
+  return filteredForView(month,view).reduce((s,t)=>{
+    if(view!=='FOYER' && t.account!==view) return s;
+    if(t.category!==cat) return s;
+    if(t.type==='Depense'||t.type==='Epargne') return s+Number(t.amount||0);
+    if(t.type==='Remboursement') return s-Number(t.amount||0);
+    return s;
+  },0);
+}
+function renderBudgetEditor(){
+  const m=document.getElementById('budgetMonth').value||nowMonth();
+  const view=document.getElementById('budgetAccount').value;
+  const b=getBudget(m,view);
+  document.getElementById('budgetEditor').innerHTML=`
+    <div class="budget-row"><b>Catégorie</b><b>Budget prévu</b><b>Réel</b><b>Écart</b></div>
+    ${state.categories.map(cat=>{
+      const planned=Number(b[cat]||0), actual=actualForBudget(m,view,cat), gap=planned-actual;
+      return `<div class="budget-row">
+        <div>${esc(cat)}</div>
+        <div><input type="number" step="0.01" value="${planned||''}" data-budget-cat="${esc(cat)}"></div>
+        <div class="right">${eur(actual)}</div>
+        <div class="right ${gap>=0?'good':'bad'}">${eur(gap)}</div>
+      </div>`;
+    }).join('')}
+    <div class="actions" style="margin-top:12px"><button class="primary" id="saveBudgetRows">Enregistrer le budget</button></div>`;
+  document.getElementById('saveBudgetRows').onclick=()=>{
+    const obj={};
+    document.querySelectorAll('[data-budget-cat]').forEach(i=>obj[i.dataset.budgetCat]=Number(i.value||0));
+    state.budgets[budgetKey(m,view)]=obj; saveState(); renderAll();
+  };
+}
+function copyPrevBudget(){
+  const m=document.getElementById('budgetMonth').value;
+  if(!m)return;
+  const [y,mo]=m.split('-').map(Number);
+  const d=new Date(y,mo-2,1);
+  const prev=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  const view=document.getElementById('budgetAccount').value;
+  state.budgets[budgetKey(m,view)]={...getBudget(prev,view)};
+  saveState(); renderBudgetEditor();
+}
+
+function loadBalanceInputs(){
+  const m=document.getElementById('balanceMonth').value||nowMonth();
+  const x=state.openingBalances[m]||{};
+  const box=document.getElementById('openingBalanceInputs');
+  if(!state.accounts.length){
+    box.innerHTML='<div class="small">Ajoute d’abord au moins un compte dans Paramètres & sauvegarde.</div>';
+    return;
+  }
+  box.innerHTML=state.accounts.map((a,i)=>`
+    <div>
+      <label>${esc(a)} — solde au 1er du mois (€)</label>
+      <input type="number" step="0.01" data-opening-account="${esc(a)}" value="${x[a]??''}">
+    </div>`).join('');
+}
+function saveBalances(){
+  const m=document.getElementById('balanceMonth').value;
+  if(!m)return;
+  const obj={};
+  document.querySelectorAll('[data-opening-account]').forEach(i=>obj[i.dataset.openingAccount]=Number(i.value||0));
+  state.openingBalances[m]=obj;
+  saveState(); renderAll();
+}
+
+
+function renderAccountManager(){
+  const box=document.getElementById('accountManager');
+  if(!box) return;
+  if(!state.accounts.length){
+    box.innerHTML='<div class="small">Aucun compte créé.</div>';
+    return;
+  }
+  box.innerHTML=state.accounts.map(a=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid #eef2f7">
+      <span>${esc(a)}</span>
+      <button class="danger" onclick="removeAccount('${String(a).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">Supprimer</button>
+    </div>`).join('');
+}
+function addAccount(){
+  const input=document.getElementById('newAccountName');
+  const name=(input.value||'').trim();
+  if(!name) return;
+  if(state.accounts.some(a=>a.toLowerCase()===name.toLowerCase())){
+    alert('Ce compte existe déjà.');
+    return;
+  }
+  state.accounts.push(name);
+  input.value='';
+  saveState(); refreshSelects(); loadBalanceInputs(); renderDashboard();
+}
+window.removeAccount=function(name){
+  const used=state.transactions.some(t=>t.account===name || t.linkedAccount===name);
+  if(used){
+    alert('Ce compte est utilisé par des transactions. Supprime ou modifie d’abord ces transactions.');
+    return;
+  }
+  if(!confirm(`Supprimer le compte "${name}" ?`)) return;
+  state.accounts=state.accounts.filter(a=>a!==name);
+  Object.values(state.openingBalances).forEach(x=>{ if(x && typeof x==='object') delete x[name]; });
+  Object.keys(state.budgets).forEach(k=>{ if(k.endsWith('|'+name)) delete state.budgets[k]; });
+  saveState(); refreshSelects(); loadBalanceInputs(); renderAll();
+};
+
+function saveSettings(){
+  state.categories=[...new Set(document.getElementById('setCategories').value.split('\n').map(x=>x.trim()).filter(Boolean))];
+  state.natures=[...new Set(document.getElementById('setNatures').value.split('\n').map(x=>x.trim()).filter(Boolean))];
+  state.types=[...new Set(document.getElementById('setTypes').value.split('\n').map(x=>x.trim()).filter(Boolean))];
+  saveState(); refreshSelects(); renderAll();
+}
+
+function download(name,text,type='text/plain'){
+  const blob=new Blob([text],{type}); const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function exportJson(){download(`budget_sauvegarde_${new Date().toISOString().slice(0,10)}.json`,JSON.stringify(state,null,2),'application/json');}
+function exportCsv(){
+  const sep=';';
+  const rows=[['Date','Compte','Compte lié','Montant','Type','Catégorie','Nature','Commentaire']];
+  [...state.transactions].sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>rows.push([t.date,t.account,t.linkedAccount||'',t.amount,t.type,t.category,t.nature,t.comment||'']));
+  const csv='\ufeff'+rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(sep)).join('\n');
+  download(`transactions_${new Date().toISOString().slice(0,10)}.csv`,csv,'text/csv;charset=utf-8');
+}
+function importJson(file){
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const x=JSON.parse(r.result);
+      if(!x.transactions||!x.categories) throw new Error();
+      state={...structuredClone(defaults),...x}; saveState(); initFields(); renderAll(); alert('Sauvegarde importée.');
+    }catch(e){alert('Fichier de sauvegarde invalide.');}
+  };
+  r.readAsText(file);
+}
+function renderAll(){refreshSelects();renderTransactions();renderBudgetEditor();renderDashboard();loadBalanceInputs();}
+
+function initFields(){
+  const m=nowMonth();
+  ['dashMonth','txFilterMonth','budgetMonth','balanceMonth'].forEach(id=>document.getElementById(id).value=m);
+  document.getElementById('txDate').value=today();
+  document.getElementById('setCategories').value=state.categories.join('\n');
+  document.getElementById('setNatures').value=state.natures.join('\n');
+  document.getElementById('setTypes').value=state.types.join('\n');
+  refreshSelects();
+  renderAccountManager();
+}
+
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); document.getElementById(b.dataset.tab).classList.add('active');
+});
+document.getElementById('addTx').onclick=addOrUpdateTx;
+document.getElementById('cancelEdit').onclick=clearTxForm;
+['txFilterMonth','txFilterAccount','txFilterType','txSearch'].forEach(id=>document.getElementById(id).addEventListener('input',renderTransactions));
+['dashMonth','dashAccount'].forEach(id=>document.getElementById(id).addEventListener('input',renderDashboard));
+document.getElementById('refreshDash').onclick=renderDashboard;
+['budgetMonth','budgetAccount'].forEach(id=>document.getElementById(id).addEventListener('input',renderBudgetEditor));
+document.getElementById('copyPrevBudget').onclick=copyPrevBudget;
+document.getElementById('balanceMonth').addEventListener('input',loadBalanceInputs);
+document.getElementById('saveBalances').onclick=saveBalances;
+document.getElementById('saveSettings').onclick=saveSettings;
+document.getElementById('addAccountBtn').onclick=addAccount;
+document.getElementById('newAccountName').addEventListener('keydown',e=>{if(e.key==='Enter')addAccount();});
+document.getElementById('exportJson').onclick=exportJson;
+document.getElementById('exportCsv').onclick=exportCsv;
+document.getElementById('importBtn').onclick=()=>document.getElementById('importFile').click();
+document.getElementById('importFile').onchange=e=>{if(e.target.files[0])importJson(e.target.files[0]); e.target.value='';};
+document.getElementById('resetAll').onclick=()=>{
+  if(confirm('Effacer toutes les données enregistrées dans ce navigateur ?')){
+    localStorage.removeItem(KEY); state=structuredClone(defaults); initFields(); renderAll();
+  }
+};
+
+initFields();
+renderAll();
+</script>
+</body>
+</html>
