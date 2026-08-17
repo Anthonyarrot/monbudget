@@ -63,12 +63,56 @@ th{background:#f8fafc;position:sticky;top:0}
 .notice{padding:10px 12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:13px}
 .footer-note{font-size:11px;color:var(--muted);margin-top:10px}
 .hidden{display:none}
+
+.auth-overlay{position:fixed;inset:0;background:rgba(247,247,245,.97);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px}
+.auth-box{width:min(520px,100%);background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 18px 50px rgba(40,49,45,.10)}
+.auth-box h2{margin-top:0}.auth-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:650px){.auth-row{grid-template-columns:1fr}}
+.auth-message{margin-top:10px;font-size:13px}.cloud-user{font-size:12px;color:var(--muted);margin-top:5px}
+
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
+
+<div id="authOverlay" class="auth-overlay">
+  <div class="auth-box" id="loginBox">
+    <h2>Connexion au budget</h2>
+    <p class="small">Anthony et Marine peuvent utiliser chacun leur propre email tout en partageant le même foyer.</p>
+    <div class="auth-row">
+      <div><label>Email</label><input id="cloudEmail" type="email" autocomplete="email"></div>
+      <div><label>Mot de passe</label><input id="cloudPassword" type="password" autocomplete="current-password"></div>
+    </div>
+    <div class="actions" style="margin-top:12px">
+      <button id="cloudLogin" class="primary">Se connecter</button>
+      <button id="cloudSignup" class="secondary">Créer un compte</button>
+    </div>
+    <div id="cloudAuthMsg" class="auth-message"></div>
+  </div>
+
+  <div class="auth-box hidden" id="householdBox">
+    <h2>Foyer partagé</h2>
+    <p class="small">Le premier utilisateur crée le foyer. Le second rejoint ce même foyer avec son identifiant.</p>
+    <div>
+      <label>Créer un foyer</label>
+      <input id="cloudHouseholdName" type="text" placeholder="ex. Foyer Anthony & Marine">
+      <button id="cloudCreateHousehold" class="primary" style="margin-top:8px">Créer</button>
+    </div>
+    <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+    <div>
+      <label>Rejoindre un foyer existant</label>
+      <input id="cloudHouseholdId" type="text" placeholder="Identifiant du foyer">
+      <button id="cloudJoinHousehold" class="secondary" style="margin-top:8px">Rejoindre</button>
+    </div>
+    <div id="cloudHouseholdMsg" class="auth-message"></div>
+  </div>
+</div>
+
 <header>
   <h1>Mon Budget</h1>
-  <div class="sub">Application locale hors ligne • données enregistrées dans ce navigateur</div>
+  <div class="sub">Connexion sécurisée Supabase • première étape de la synchronisation</div>
+<div id="cloudUser" class="cloud-user hidden"></div>
+<button id="cloudSignOut" class="secondary hidden" style="margin-top:8px">Se déconnecter</button>
 </header>
 
 <main>
@@ -190,6 +234,16 @@ th{background:#f8fafc;position:sticky;top:0}
   </section>
 
   <section id="settings" class="panel">
+
+    <div class="card">
+      <h3>Synchronisation du foyer</h3>
+      <div class="small">Identifiant du foyer à transmettre uniquement à l'autre membre du foyer.</div>
+      <div id="cloudHouseholdDisplay" style="margin-top:8px;padding:9px;border:1px solid var(--line);border-radius:7px;word-break:break-all;font-family:monospace"></div>
+      <div class="actions" style="margin-top:8px">
+        <button id="cloudCopyHousehold" class="secondary">Copier l'identifiant</button>
+      </div>
+    </div>
+
     <div class="card">
       <h3>Comptes</h3>
       <div class="grid g2">
@@ -644,5 +698,159 @@ document.getElementById('resetAll').onclick=()=>{
 initFields();
 renderAll();
 </script>
+
+<script>
+const CLOUD_URL = "https://fjlqjhwfuejrhgpaflup.supabase.co";
+const CLOUD_KEY = "sb_publishable_QOJbiQUMwcvhuY4ZY4b8jQ_LUl-_22y";
+const cloud = window.supabase.createClient(CLOUD_URL, CLOUD_KEY);
+
+let cloudSession = null;
+let cloudHousehold = null;
+
+function cloudMsg(id,text,isBad=false){
+  const el=document.getElementById(id);
+  el.textContent=text||"";
+  el.className="auth-message "+(isBad?"bad":"good");
+}
+function showCloudLogin(){
+  document.getElementById("authOverlay").classList.remove("hidden");
+  document.getElementById("loginBox").classList.remove("hidden");
+  document.getElementById("householdBox").classList.add("hidden");
+}
+function showCloudHousehold(){
+  document.getElementById("authOverlay").classList.remove("hidden");
+  document.getElementById("loginBox").classList.add("hidden");
+  document.getElementById("householdBox").classList.remove("hidden");
+}
+function showCloudApp(){
+  document.getElementById("authOverlay").classList.add("hidden");
+  document.getElementById("cloudUser").classList.remove("hidden");
+  document.getElementById("cloudSignOut").classList.remove("hidden");
+  document.getElementById("cloudUser").textContent=cloudSession?.user?.email||"";
+  document.getElementById("cloudHouseholdDisplay").textContent=cloudHousehold?.id||"";
+}
+
+async function findCloudHousehold(){
+  const uid=cloudSession.user.id;
+  let r=await cloud.from("household_members").select("household_id,role").eq("user_id",uid).limit(1);
+  if(r.error) throw r.error;
+  if(r.data?.length){
+    const h=await cloud.from("households").select("*").eq("id",r.data[0].household_id).single();
+    if(h.error) throw h.error;
+    return h.data;
+  }
+  r=await cloud.from("households").select("*").eq("owner_user_id",uid).limit(1);
+  if(r.error) throw r.error;
+  return r.data?.[0]||null;
+}
+
+async function loadCloudAccounts(){
+  if(!cloudHousehold) return;
+  const r=await cloud.from("accounts").select("*").eq("household_id",cloudHousehold.id).eq("is_active",true).order("created_at");
+  if(r.error) throw r.error;
+  state.accounts=(r.data||[]).map(x=>x.name);
+  saveState();
+  refreshSelects();
+  renderAccountManager();
+  renderDashboard();
+  loadBalanceInputs();
+}
+
+async function cloudAddAccount(){
+  const input=document.getElementById("newAccountName");
+  const name=(input.value||"").trim();
+  if(!name) return;
+  const r=await cloud.from("accounts").insert({household_id:cloudHousehold.id,name});
+  if(r.error){ alert(r.error.message); return; }
+  input.value="";
+  await loadCloudAccounts();
+}
+async function cloudRemoveAccount(name){
+  const a=await cloud.from("accounts").select("id").eq("household_id",cloudHousehold.id).eq("name",name).single();
+  if(a.error){ alert(a.error.message); return; }
+  if(state.transactions.some(t=>t.account===name||t.linkedAccount===name)){
+    alert("Ce compte est utilisé par des transactions locales. Supprime ou modifie d’abord ces transactions.");
+    return;
+  }
+  if(!confirm(`Supprimer le compte "${name}" ?`)) return;
+  const r=await cloud.from("accounts").update({is_active:false}).eq("id",a.data.id);
+  if(r.error){ alert(r.error.message); return; }
+  await loadCloudAccounts();
+}
+
+async function afterCloudLogin(){
+  cloudHousehold=await findCloudHousehold();
+  if(!cloudHousehold){ showCloudHousehold(); return; }
+  await loadCloudAccounts();
+  showCloudApp();
+
+  // Remplace seulement la gestion des comptes pour cette première version connectée.
+  document.getElementById("addAccountBtn").onclick=cloudAddAccount;
+  window.removeAccount=cloudRemoveAccount;
+}
+
+document.getElementById("cloudLogin").onclick=async()=>{
+  cloudMsg("cloudAuthMsg","Connexion...");
+  const {error}=await cloud.auth.signInWithPassword({
+    email:document.getElementById("cloudEmail").value.trim(),
+    password:document.getElementById("cloudPassword").value
+  });
+  if(error) cloudMsg("cloudAuthMsg",error.message,true);
+};
+document.getElementById("cloudSignup").onclick=async()=>{
+  const email=document.getElementById("cloudEmail").value.trim();
+  const password=document.getElementById("cloudPassword").value;
+  if(password.length<8){ cloudMsg("cloudAuthMsg","Mot de passe : 8 caractères minimum.",true); return; }
+  const {data,error}=await cloud.auth.signUp({email,password});
+  if(error){ cloudMsg("cloudAuthMsg",error.message,true); return; }
+  cloudMsg("cloudAuthMsg",data.session?"Compte créé.":"Compte créé. Vérifie ton email si une confirmation est demandée.");
+};
+document.getElementById("cloudSignOut").onclick=()=>cloud.auth.signOut();
+
+document.getElementById("cloudCreateHousehold").onclick=async()=>{
+  const name=document.getElementById("cloudHouseholdName").value.trim();
+  if(!name) return cloudMsg("cloudHouseholdMsg","Indique un nom.",true);
+  let r=await cloud.from("households").insert({name,owner_user_id:cloudSession.user.id}).select().single();
+  if(r.error) return cloudMsg("cloudHouseholdMsg",r.error.message,true);
+  cloudHousehold=r.data;
+  r=await cloud.from("household_members").insert({household_id:cloudHousehold.id,user_id:cloudSession.user.id,role:"owner"});
+  if(r.error) return cloudMsg("cloudHouseholdMsg",r.error.message,true);
+  await afterCloudLogin();
+};
+
+document.getElementById("cloudJoinHousehold").onclick=async()=>{
+  const hid=document.getElementById("cloudHouseholdId").value.trim();
+  if(!hid) return cloudMsg("cloudHouseholdMsg","Colle l’identifiant du foyer.",true);
+  const r=await cloud.from("household_members").insert({household_id:hid,user_id:cloudSession.user.id,role:"member"});
+  if(r.error) return cloudMsg("cloudHouseholdMsg",r.error.message,true);
+  await afterCloudLogin();
+};
+
+document.getElementById("cloudCopyHousehold").onclick=async()=>{
+  if(!cloudHousehold?.id) return;
+  await navigator.clipboard.writeText(cloudHousehold.id);
+  alert("Identifiant du foyer copié.");
+};
+
+cloud.auth.onAuthStateChange(async(_event,newSession)=>{
+  cloudSession=newSession;
+  if(!cloudSession){
+    cloudHousehold=null;
+    document.getElementById("cloudUser").classList.add("hidden");
+    document.getElementById("cloudSignOut").classList.add("hidden");
+    showCloudLogin();
+    return;
+  }
+  try{ await afterCloudLogin(); }
+  catch(e){ cloudMsg("cloudHouseholdMsg",e.message,true); showCloudHousehold(); }
+});
+
+(async()=>{
+  const {data}=await cloud.auth.getSession();
+  cloudSession=data.session;
+  if(!cloudSession) showCloudLogin();
+})();
+</script>
+
 </body>
 </html>
