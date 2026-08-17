@@ -699,6 +699,7 @@ initFields();
 renderAll();
 </script>
 
+
 <script>
 const CLOUD_URL = "https://fjlqjhwfuejrhgpaflup.supabase.co";
 const CLOUD_KEY = "sb_publishable_QOJbiQUMwcvhuY4ZY4b8jQ_LUl-_22y";
@@ -706,22 +707,27 @@ const cloud = window.supabase.createClient(CLOUD_URL, CLOUD_KEY);
 
 let cloudSession = null;
 let cloudHousehold = null;
+let authBusy = false;
 
 function cloudMsg(id,text,isBad=false){
   const el=document.getElementById(id);
+  if(!el) return;
   el.textContent=text||"";
   el.className="auth-message "+(isBad?"bad":"good");
 }
+
 function showCloudLogin(){
   document.getElementById("authOverlay").classList.remove("hidden");
   document.getElementById("loginBox").classList.remove("hidden");
   document.getElementById("householdBox").classList.add("hidden");
 }
+
 function showCloudHousehold(){
   document.getElementById("authOverlay").classList.remove("hidden");
   document.getElementById("loginBox").classList.add("hidden");
   document.getElementById("householdBox").classList.remove("hidden");
 }
+
 function showCloudApp(){
   document.getElementById("authOverlay").classList.add("hidden");
   document.getElementById("cloudUser").classList.remove("hidden");
@@ -730,24 +736,82 @@ function showCloudApp(){
   document.getElementById("cloudHouseholdDisplay").textContent=cloudHousehold?.id||"";
 }
 
-async function findCloudHousehold(){
-  const uid=cloudSession.user.id;
-  let r=await cloud.from("household_members").select("household_id,role").eq("user_id",uid).limit(1);
-  if(r.error) throw r.error;
-  if(r.data?.length){
-    const h=await cloud.from("households").select("*").eq("id",r.data[0].household_id).single();
-    if(h.error) throw h.error;
-    return h.data;
-  }
-  r=await cloud.from("households").select("*").eq("owner_user_id",uid).limit(1);
-  if(r.error) throw r.error;
+function setAuthButtons(disabled){
+  document.getElementById("cloudLogin").disabled=disabled;
+  document.getElementById("cloudSignup").disabled=disabled;
+}
+
+async function getOwnedHousehold(){
+  const r=await cloud
+    .from("households")
+    .select("*")
+    .eq("owner_user_id",cloudSession.user.id)
+    .limit(1);
+  if(r.error) throw new Error("Lecture du foyer propriétaire : "+r.error.message);
   return r.data?.[0]||null;
+}
+
+async function getMemberHousehold(){
+  const r=await cloud
+    .from("household_members")
+    .select("household_id,role")
+    .eq("user_id",cloudSession.user.id)
+    .limit(1);
+  if(r.error) throw new Error("Lecture de l'appartenance au foyer : "+r.error.message);
+  if(!r.data?.length) return null;
+
+  const h=await cloud
+    .from("households")
+    .select("*")
+    .eq("id",r.data[0].household_id)
+    .single();
+
+  if(h.error) throw new Error("Lecture du foyer : "+h.error.message);
+  return h.data;
+}
+
+async function findCloudHousehold(){
+  // First try membership, then ownership.
+  const memberHousehold=await getMemberHousehold();
+  if(memberHousehold) return memberHousehold;
+  return await getOwnedHousehold();
+}
+
+async function ensureOwnerMembership(household){
+  if(!household) return;
+  const check=await cloud
+    .from("household_members")
+    .select("id")
+    .eq("household_id",household.id)
+    .eq("user_id",cloudSession.user.id)
+    .limit(1);
+
+  if(check.error) throw new Error("Vérification du membre : "+check.error.message);
+  if(check.data?.length) return;
+
+  const ins=await cloud
+    .from("household_members")
+    .insert({
+      household_id:household.id,
+      user_id:cloudSession.user.id,
+      role:"owner"
+    });
+
+  if(ins.error) throw new Error("Ajout du propriétaire au foyer : "+ins.error.message);
 }
 
 async function loadCloudAccounts(){
   if(!cloudHousehold) return;
-  const r=await cloud.from("accounts").select("*").eq("household_id",cloudHousehold.id).eq("is_active",true).order("created_at");
-  if(r.error) throw r.error;
+
+  const r=await cloud
+    .from("accounts")
+    .select("*")
+    .eq("household_id",cloudHousehold.id)
+    .eq("is_active",true)
+    .order("created_at");
+
+  if(r.error) throw new Error("Chargement des comptes : "+r.error.message);
+
   state.accounts=(r.data||[]).map(x=>x.name);
   saveState();
   refreshSelects();
@@ -756,99 +820,278 @@ async function loadCloudAccounts(){
   loadBalanceInputs();
 }
 
-async function cloudAddAccount(){
-  const input=document.getElementById("newAccountName");
-  const name=(input.value||"").trim();
-  if(!name) return;
-  const r=await cloud.from("accounts").insert({household_id:cloudHousehold.id,name});
-  if(r.error){ alert(r.error.message); return; }
-  input.value="";
-  await loadCloudAccounts();
-}
-async function cloudRemoveAccount(name){
-  const a=await cloud.from("accounts").select("id").eq("household_id",cloudHousehold.id).eq("name",name).single();
-  if(a.error){ alert(a.error.message); return; }
-  if(state.transactions.some(t=>t.account===name||t.linkedAccount===name)){
-    alert("Ce compte est utilisé par des transactions locales. Supprime ou modifie d’abord ces transactions.");
-    return;
-  }
-  if(!confirm(`Supprimer le compte "${name}" ?`)) return;
-  const r=await cloud.from("accounts").update({is_active:false}).eq("id",a.data.id);
-  if(r.error){ alert(r.error.message); return; }
-  await loadCloudAccounts();
-}
-
 async function afterCloudLogin(){
   cloudHousehold=await findCloudHousehold();
-  if(!cloudHousehold){ showCloudHousehold(); return; }
+
+  if(!cloudHousehold){
+    showCloudHousehold();
+    cloudMsg("cloudHouseholdMsg","Aucun foyer trouvé. Tu peux en créer un ou rejoindre un foyer existant.");
+    return;
+  }
+
+  // If this is the owner and membership is missing, repair it automatically.
+  if(cloudHousehold.owner_user_id===cloudSession.user.id){
+    await ensureOwnerMembership(cloudHousehold);
+  }
+
   await loadCloudAccounts();
   showCloudApp();
 
-  // Remplace seulement la gestion des comptes pour cette première version connectée.
   document.getElementById("addAccountBtn").onclick=cloudAddAccount;
   window.removeAccount=cloudRemoveAccount;
 }
 
-document.getElementById("cloudLogin").onclick=async()=>{
+async function cloudAddAccount(){
+  const input=document.getElementById("newAccountName");
+  const name=(input.value||"").trim();
+  if(!name) return;
+
+  if(state.accounts.some(a=>a.toLowerCase()===name.toLowerCase())){
+    alert("Ce compte existe déjà.");
+    return;
+  }
+
+  const r=await cloud
+    .from("accounts")
+    .insert({household_id:cloudHousehold.id,name});
+
+  if(r.error){
+    alert("Erreur lors de l'ajout du compte : "+r.error.message);
+    return;
+  }
+
+  input.value="";
+  await loadCloudAccounts();
+}
+
+async function cloudRemoveAccount(name){
+  if(state.transactions.some(t=>t.account===name||t.linkedAccount===name)){
+    alert("Ce compte est utilisé par des transactions locales. Supprime ou modifie d’abord ces transactions.");
+    return;
+  }
+
+  if(!confirm(`Supprimer le compte "${name}" ?`)) return;
+
+  const a=await cloud
+    .from("accounts")
+    .select("id")
+    .eq("household_id",cloudHousehold.id)
+    .eq("name",name)
+    .single();
+
+  if(a.error){
+    alert("Impossible de retrouver le compte : "+a.error.message);
+    return;
+  }
+
+  const r=await cloud
+    .from("accounts")
+    .update({is_active:false})
+    .eq("id",a.data.id);
+
+  if(r.error){
+    alert("Erreur lors de la suppression : "+r.error.message);
+    return;
+  }
+
+  await loadCloudAccounts();
+}
+
+async function doLogin(){
+  if(authBusy) return;
+  authBusy=true;
+  setAuthButtons(true);
   cloudMsg("cloudAuthMsg","Connexion...");
-  const {error}=await cloud.auth.signInWithPassword({
-    email:document.getElementById("cloudEmail").value.trim(),
-    password:document.getElementById("cloudPassword").value
-  });
-  if(error) cloudMsg("cloudAuthMsg",error.message,true);
+
+  try{
+    const email=document.getElementById("cloudEmail").value.trim();
+    const password=document.getElementById("cloudPassword").value;
+
+    const {data,error}=await cloud.auth.signInWithPassword({email,password});
+    if(error) throw new Error(error.message);
+    if(!data.session) throw new Error("Connexion réussie mais aucune session n'a été créée.");
+
+    cloudSession=data.session;
+    cloudMsg("cloudAuthMsg","Connexion réussie.");
+
+    await afterCloudLogin();
+  }catch(e){
+    cloudMsg("cloudAuthMsg",e.message,true);
+    showCloudLogin();
+  }finally{
+    authBusy=false;
+    setAuthButtons(false);
+  }
+}
+
+async function doSignup(){
+  if(authBusy) return;
+  authBusy=true;
+  setAuthButtons(true);
+
+  try{
+    const email=document.getElementById("cloudEmail").value.trim();
+    const password=document.getElementById("cloudPassword").value;
+
+    if(password.length<8){
+      throw new Error("Mot de passe : 8 caractères minimum.");
+    }
+
+    cloudMsg("cloudAuthMsg","Création du compte...");
+
+    const redirectTo=window.location.origin+window.location.pathname;
+
+    const {data,error}=await cloud.auth.signUp({
+      email,
+      password,
+      options:{emailRedirectTo:redirectTo}
+    });
+
+    if(error) throw new Error(error.message);
+
+    if(data.session){
+      cloudSession=data.session;
+      cloudMsg("cloudAuthMsg","Compte créé et connecté.");
+      await afterCloudLogin();
+    }else{
+      cloudMsg("cloudAuthMsg","Compte créé. Vérifie ton email puis reviens sur cette page pour te connecter.");
+    }
+  }catch(e){
+    cloudMsg("cloudAuthMsg",e.message,true);
+  }finally{
+    authBusy=false;
+    setAuthButtons(false);
+  }
+}
+
+document.getElementById("cloudLogin").onclick=doLogin;
+document.getElementById("cloudSignup").onclick=doSignup;
+
+document.getElementById("cloudEmail").addEventListener("keydown",e=>{
+  if(e.key==="Enter") doLogin();
+});
+document.getElementById("cloudPassword").addEventListener("keydown",e=>{
+  if(e.key==="Enter") doLogin();
+});
+
+document.getElementById("cloudSignOut").onclick=async()=>{
+  await cloud.auth.signOut();
+  cloudSession=null;
+  cloudHousehold=null;
+  showCloudLogin();
 };
-document.getElementById("cloudSignup").onclick=async()=>{
-  const email=document.getElementById("cloudEmail").value.trim();
-  const password=document.getElementById("cloudPassword").value;
-  if(password.length<8){ cloudMsg("cloudAuthMsg","Mot de passe : 8 caractères minimum.",true); return; }
-  const {data,error}=await cloud.auth.signUp({email,password});
-  if(error){ cloudMsg("cloudAuthMsg",error.message,true); return; }
-  cloudMsg("cloudAuthMsg",data.session?"Compte créé.":"Compte créé. Vérifie ton email si une confirmation est demandée.");
-};
-document.getElementById("cloudSignOut").onclick=()=>cloud.auth.signOut();
 
 document.getElementById("cloudCreateHousehold").onclick=async()=>{
   const name=document.getElementById("cloudHouseholdName").value.trim();
-  if(!name) return cloudMsg("cloudHouseholdMsg","Indique un nom.",true);
-  let r=await cloud.from("households").insert({name,owner_user_id:cloudSession.user.id}).select().single();
-  if(r.error) return cloudMsg("cloudHouseholdMsg",r.error.message,true);
-  cloudHousehold=r.data;
-  r=await cloud.from("household_members").insert({household_id:cloudHousehold.id,user_id:cloudSession.user.id,role:"owner"});
-  if(r.error) return cloudMsg("cloudHouseholdMsg",r.error.message,true);
-  await afterCloudLogin();
+  if(!name){
+    cloudMsg("cloudHouseholdMsg","Indique un nom.",true);
+    return;
+  }
+
+  cloudMsg("cloudHouseholdMsg","Création du foyer...");
+
+  try{
+    // Avoid duplicate household if it was already created during previous tests.
+    const existing=await getOwnedHousehold();
+    if(existing){
+      cloudHousehold=existing;
+      await ensureOwnerMembership(cloudHousehold);
+      await afterCloudLogin();
+      return;
+    }
+
+    const r=await cloud
+      .from("households")
+      .insert({name,owner_user_id:cloudSession.user.id})
+      .select()
+      .single();
+
+    if(r.error) throw new Error("Création du foyer : "+r.error.message);
+
+    cloudHousehold=r.data;
+    await ensureOwnerMembership(cloudHousehold);
+    await afterCloudLogin();
+  }catch(e){
+    cloudMsg("cloudHouseholdMsg",e.message,true);
+  }
 };
 
 document.getElementById("cloudJoinHousehold").onclick=async()=>{
   const hid=document.getElementById("cloudHouseholdId").value.trim();
-  if(!hid) return cloudMsg("cloudHouseholdMsg","Colle l’identifiant du foyer.",true);
-  const r=await cloud.from("household_members").insert({household_id:hid,user_id:cloudSession.user.id,role:"member"});
-  if(r.error) return cloudMsg("cloudHouseholdMsg",r.error.message,true);
-  await afterCloudLogin();
+  if(!hid){
+    cloudMsg("cloudHouseholdMsg","Colle l’identifiant du foyer.",true);
+    return;
+  }
+
+  cloudMsg("cloudHouseholdMsg","Rattachement au foyer...");
+
+  try{
+    // Verify household exists and is readable before insertion.
+    const h=await cloud
+      .from("households")
+      .select("id,name")
+      .eq("id",hid)
+      .single();
+
+    if(h.error) throw new Error("Foyer introuvable ou non accessible : "+h.error.message);
+
+    const r=await cloud
+      .from("household_members")
+      .insert({
+        household_id:hid,
+        user_id:cloudSession.user.id,
+        role:"member"
+      });
+
+    if(r.error) throw new Error("Rattachement au foyer : "+r.error.message);
+
+    await afterCloudLogin();
+  }catch(e){
+    cloudMsg("cloudHouseholdMsg",e.message,true);
+  }
 };
 
 document.getElementById("cloudCopyHousehold").onclick=async()=>{
   if(!cloudHousehold?.id) return;
-  await navigator.clipboard.writeText(cloudHousehold.id);
-  alert("Identifiant du foyer copié.");
+  try{
+    await navigator.clipboard.writeText(cloudHousehold.id);
+    alert("Identifiant du foyer copié.");
+  }catch{
+    prompt("Copie cet identifiant :",cloudHousehold.id);
+  }
 };
 
-cloud.auth.onAuthStateChange(async(_event,newSession)=>{
+// Keep the auth listener minimal. All navigation is handled explicitly elsewhere.
+cloud.auth.onAuthStateChange((event,newSession)=>{
   cloudSession=newSession;
-  if(!cloudSession){
+  if(event==="SIGNED_OUT"){
     cloudHousehold=null;
     document.getElementById("cloudUser").classList.add("hidden");
     document.getElementById("cloudSignOut").classList.add("hidden");
     showCloudLogin();
-    return;
   }
-  try{ await afterCloudLogin(); }
-  catch(e){ cloudMsg("cloudHouseholdMsg",e.message,true); showCloudHousehold(); }
 });
 
 (async()=>{
-  const {data}=await cloud.auth.getSession();
-  cloudSession=data.session;
-  if(!cloudSession) showCloudLogin();
+  try{
+    cloudMsg("cloudAuthMsg","Vérification de la session...");
+    const {data,error}=await cloud.auth.getSession();
+
+    if(error) throw error;
+
+    cloudSession=data.session;
+
+    if(!cloudSession){
+      cloudMsg("cloudAuthMsg","");
+      showCloudLogin();
+      return;
+    }
+
+    await afterCloudLogin();
+  }catch(e){
+    cloudMsg("cloudAuthMsg","Erreur au démarrage : "+e.message,true);
+    showCloudLogin();
+  }
 })();
 </script>
 
