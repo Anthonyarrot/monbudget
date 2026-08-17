@@ -88,6 +88,7 @@ th{background:#f8fafc;position:sticky;top:0}
       <button id="cloudSignup" class="secondary">Créer un compte</button>
     </div>
     <div id="cloudAuthMsg" class="auth-message"></div>
+    <div id="diagBox" class="small" style="margin-top:12px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fafafa;white-space:pre-wrap"></div>
   </div>
 
   <div class="auth-box hidden" id="householdBox">
@@ -712,7 +713,10 @@ let authBusy = false;
 function withTimeout(promise, ms, label){
   return Promise.race([
     promise,
-    new Promise((_,reject)=>setTimeout(()=>reject(new Error(label+" : délai dépassé")),ms))
+    new Promise((_,reject)=>setTimeout(()=>{
+      diag("TIMEOUT : "+label);
+      reject(new Error(label+" : délai dépassé"));
+    },ms))
   ]);
 }
 
@@ -722,6 +726,12 @@ function cloudMsg(id,text,isBad=false){
   if(!el) return;
   el.textContent=text||"";
   el.className="auth-message "+(isBad?"bad":"good");
+}
+function diag(msg){
+  const el=document.getElementById("diagBox");
+  if(!el) return;
+  const stamp=new Date().toLocaleTimeString("fr-FR");
+  el.textContent += `[${stamp}] ${msg}\n`;
 }
 
 function showCloudLogin(){
@@ -750,23 +760,36 @@ function setAuthButtons(disabled){
 }
 
 async function getOwnedHousehold(){
+  diag("Étape A : recherche du foyer propriétaire...");
   const r=await cloud
     .from("households")
     .select("*")
     .eq("owner_user_id",cloudSession.user.id)
     .limit(1);
-  if(r.error) throw new Error("Lecture du foyer propriétaire : "+r.error.message);
+  if(r.error){
+    diag("ERREUR A : "+r.error.message);
+    throw new Error("Lecture du foyer propriétaire : "+r.error.message);
+  }
+  diag("Étape A OK : "+(r.data?.length ? "foyer propriétaire trouvé" : "aucun foyer propriétaire"));
   return r.data?.[0]||null;
 }
 
 async function getMemberHousehold(){
+  diag("Étape B : recherche de l'appartenance household_members...");
   const r=await cloud
     .from("household_members")
     .select("household_id,role")
     .eq("user_id",cloudSession.user.id)
     .limit(1);
-  if(r.error) throw new Error("Lecture de l'appartenance au foyer : "+r.error.message);
-  if(!r.data?.length) return null;
+  if(r.error){
+    diag("ERREUR B : "+r.error.message);
+    throw new Error("Lecture de l'appartenance au foyer : "+r.error.message);
+  }
+  if(!r.data?.length){
+    diag("Étape B OK : aucune appartenance trouvée");
+    return null;
+  }
+  diag("Étape B OK : appartenance trouvée, lecture du foyer...");
 
   const h=await cloud
     .from("households")
@@ -774,7 +797,11 @@ async function getMemberHousehold(){
     .eq("id",r.data[0].household_id)
     .single();
 
-  if(h.error) throw new Error("Lecture du foyer : "+h.error.message);
+  if(h.error){
+    diag("ERREUR B2 : "+h.error.message);
+    throw new Error("Lecture du foyer : "+h.error.message);
+  }
+  diag("Étape B2 OK : foyer membre trouvé");
   return h.data;
 }
 
@@ -810,6 +837,7 @@ async function ensureOwnerMembership(household){
 
 async function loadCloudAccounts(){
   if(!cloudHousehold) return;
+  diag("Étape C : chargement des comptes du foyer "+cloudHousehold.id+"...");
 
   const r=await cloud
     .from("accounts")
@@ -818,7 +846,11 @@ async function loadCloudAccounts(){
     .eq("is_active",true)
     .order("created_at");
 
-  if(r.error) throw new Error("Chargement des comptes : "+r.error.message);
+  if(r.error){
+    diag("ERREUR C : "+r.error.message);
+    throw new Error("Chargement des comptes : "+r.error.message);
+  }
+  diag("Étape C OK : "+(r.data||[]).length+" compte(s) chargé(s)");
 
   state.accounts=(r.data||[]).map(x=>x.name);
   saveState();
@@ -829,9 +861,11 @@ async function loadCloudAccounts(){
 }
 
 async function afterCloudLogin(){
+  diag("Début du chargement après connexion");
   cloudHousehold=await findCloudHousehold();
 
   if(!cloudHousehold){
+    diag("Aucun foyer trouvé");
     showCloudHousehold();
     cloudMsg("cloudHouseholdMsg","Aucun foyer trouvé. Tu peux en créer un ou rejoindre un foyer existant.");
     return;
@@ -844,7 +878,9 @@ async function afterCloudLogin(){
     });
   }
 
+  diag("Foyer trouvé : "+cloudHousehold.name+" ("+cloudHousehold.id+")");
   await loadCloudAccounts();
+  diag("Affichage de l'application");
   showCloudApp();
 
   document.getElementById("addAccountBtn").onclick=cloudAddAccount;
@@ -909,6 +945,8 @@ async function cloudRemoveAccount(name){
 
 async function doLogin(){
   if(authBusy) return;
+  document.getElementById("diagBox").textContent="";
+  diag("Clic sur Se connecter");
   authBusy=true;
   setAuthButtons(true);
   cloudMsg("cloudAuthMsg","Connexion...");
@@ -917,14 +955,23 @@ async function doLogin(){
     const email=document.getElementById("cloudEmail").value.trim();
     const password=document.getElementById("cloudPassword").value;
 
+    diag("Étape AUTH : envoi de la connexion à Supabase...");
     const {data,error}=await cloud.auth.signInWithPassword({email,password});
-    if(error) throw new Error(error.message);
-    if(!data.session) throw new Error("Connexion réussie mais aucune session n'a été créée.");
+    if(error){
+      diag("ERREUR AUTH : "+error.message);
+      throw new Error(error.message);
+    }
+    if(!data.session){
+      diag("ERREUR AUTH : aucune session reçue");
+      throw new Error("Connexion réussie mais aucune session n'a été créée.");
+    }
 
+    diag("Étape AUTH OK : session reçue pour "+(data.user?.email||email));
     cloudSession=data.session;
     cloudMsg("cloudAuthMsg","Connexion réussie. Chargement du foyer...");
     await withTimeout(afterCloudLogin(),12000,"Chargement du foyer");
   }catch(e){
+    diag("ARRÊT : "+e.message);
     cloudMsg("cloudAuthMsg",e.message,true);
     showCloudLogin();
   }finally{
